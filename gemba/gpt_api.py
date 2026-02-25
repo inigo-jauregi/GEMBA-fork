@@ -7,6 +7,8 @@ from termcolor import colored
 from datetime import datetime
 import openai
 import tqdm
+import boto3
+import json
 
 
 # class for calling OpenAI API and handling cache
@@ -14,7 +16,17 @@ class GptApi:
     def __init__(self, verbose=False):
         self.verbose = verbose
 
-        if "OPENAI_AZURE_ENDPOINT" in os.environ:
+        if "AWS_ACCESS_KEY_ID" in os.environ or "AWS_PROFILE" in os.environ:
+            # Bedrock API access
+            region_name = os.environ.get("AWS_REGION_NAME", "us-east-1")
+            profile_name = os.environ.get("AWS_PROFILE")
+            if profile_name:
+                session = boto3.Session(profile_name=profile_name)
+                self.client = session.client(service_name='bedrock-runtime', region_name=region_name)
+            else:
+                self.client = boto3.client(service_name='bedrock-runtime', region_name=region_name)
+            self.api_type = "bedrock"
+        elif "OPENAI_AZURE_ENDPOINT" in os.environ:
             assert "OPENAI_AZURE_KEY" in os.environ, "OPENAI_AZURE_KEY not found in environment"
 
             # Azure API access
@@ -23,25 +35,28 @@ class GptApi:
                 azure_endpoint=os.environ["OPENAI_AZURE_ENDPOINT"],
                 api_version="2023-07-01-preview"
             )
+            self.api_type = "openai"
         elif "OPENAI_API_KEY" in os.environ:
             # OpenAI API access
             self.client = openai.OpenAI(
                 api_key=os.environ["OPENAI_API_KEY"]
             )
+            self.api_type = "openai"
         else:
-            raise Exception("OPENAI_API_KEY or OPENAI_AZURE_KEY not found in environment")
+            raise Exception("OPENAI_API_KEY, OPENAI_AZURE_KEY, or AWS credentials not found in environment")
 
         logging.getLogger().setLevel(logging.CRITICAL)  # in order to suppress all these HTTP INFO log messages
 
     # answer_id is used for determining if it was the top answer or how deep in the list it was
     def request(self, prompt, model, parse_response, temperature=0, answer_id=-1, cache=None, max_tokens=None):
-        request = {"model": model, "temperature": temperature, "prompt": prompt}
+        request_key = json.dumps({"model": model, "temperature": temperature, "prompt": prompt}, sort_keys=True)
 
-        if request in cache and cache[request] is not None and len(cache[request]) > 0:
-            answers = cache[request]
+        if cache is not None and request_key in cache and cache[request_key] is not None and len(cache[request_key]) > 0:
+            answers = cache[request_key]
         else:
             answers = self.request_api(prompt, model, temperature, max_tokens)
-            cache[request] = answers
+            if cache is not None:
+                cache[request_key] = answers
 
         # there is no valid answer
         if len(answers) == 0:
@@ -60,7 +75,7 @@ class GptApi:
             full_answer = full_answer["answer"]
             answer_id += 1
             answer = parse_response(full_answer)
-            if self.verbose or temperature > 0:
+            if self.verbose:
                 print(f"Answer (t={temperature}): " + colored(answer, "yellow") + " (" + colored(full_answer, "blue") + ")", file=sys.stderr)
             if answer is None:
                 continue
@@ -87,6 +102,9 @@ class GptApi:
 
         while True:
             try:
+                if self.api_type == "bedrock":
+                    return self.call_bedrock_api(prompt, model, temperature, max_tokens)
+                
                 response = self.call_api(prompt, model, temperature, max_tokens)
                 break
             except Exception as e:
@@ -131,6 +149,112 @@ class GptApi:
             answers = [dict(t) for t in {tuple(d.items()) for d in answers}]
 
         return answers
+
+    def call_bedrock_api(self, prompt, model, temperature, max_tokens):
+        # Bedrock models have different request/response formats. 
+        # Here we support Claude (Anthropic) and general Converse API if possible, 
+        # but for simplicity and broader compatibility within GEMBA's structure, 
+        # we'll use the Converse API which is more unified.
+        
+        if isinstance(prompt, list):
+            messages = prompt
+        else:
+            messages = [{
+                "role": "user",
+                "content": [{"text": prompt}],
+            }]
+
+        # Convert OpenAI-style messages to Bedrock Converse messages if needed
+        bedrock_messages = []
+        system_prompts = []
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+            if role == "system":
+                system_prompts.append({"text": content})
+            else:
+                if isinstance(content, str):
+                    bedrock_messages.append({
+                        "role": role,
+                        "content": [{"text": content}]
+                    })
+                else:
+                    bedrock_messages.append({
+                        "role": role,
+                        "content": content
+                    })
+
+        inference_config = {
+            "temperature": temperature / 10.0,
+            "topP": 1.0,
+        }
+        if max_tokens:
+            inference_config["maxTokens"] = max_tokens
+
+        try:
+            params = {
+                "modelId": model,
+                "messages": bedrock_messages,
+                "inferenceConfig": inference_config,
+            }
+            if system_prompts:
+                params["system"] = system_prompts
+
+            response = self.client.converse(**params)
+
+            # Generalized response parsing
+            if 'output' in response and 'message' in response['output'] and 'content' in response['output']['message']:
+                content = response['output']['message']['content']
+            elif 'content' in response:
+                # Fallback if content is directly in response (some models/mock responses)
+                content = response['content']
+            else:
+                if self.verbose:
+                    print(f"Unexpected Bedrock response format: {response}", file=sys.stderr)
+                return []
+
+            if isinstance(content, list):
+                texts = [block['text'] for block in content if isinstance(block, dict) and 'text' in block]
+            elif isinstance(content, dict) and 'text' in content:
+                texts = [content['text']]
+            elif isinstance(content, str):
+                texts = [content]
+            else:
+                texts = []
+
+            if not texts:
+                # If no text block is found, it might be a tool use or something else.
+                # For GEMBA, we expect text. If missing, we should probably handle it or log it.
+                if self.verbose:
+                    print(f"No text in Bedrock response: {response}", file=sys.stderr)
+                return []
+            
+            answer = "\n".join(texts).strip()
+            finish_reason = response['stopReason']
+            
+            # Map Bedrock stop reasons to OpenAI finish reasons
+            if finish_reason == "end_turn":
+                finish_reason = "stop"
+            elif finish_reason == "max_tokens":
+                finish_reason = "length"
+
+            if finish_reason != "stop":
+                if self.verbose:
+                    print(colored(f"Increasing max tokens to fit answers.", "red") + colored(answer, "blue"), file=sys.stderr)
+                if max_tokens is None:
+                    # Default max tokens if none provided and it didn't finish
+                    return self.call_bedrock_api(prompt, model, temperature, 500)
+                return self.call_bedrock_api(prompt, model, temperature, max_tokens + 200)
+
+            return [{
+                "answer": answer,
+                "finish_reason": finish_reason,
+            }]
+        except Exception as e:
+            print(colored("Error calling Bedrock, retrying...", "red"), file=sys.stderr)
+            print(e, file=sys.stderr)
+            time.sleep(1)
+            return self.call_bedrock_api(prompt, model, temperature, max_tokens)
 
     def call_api(self, prompt, model, temperature, max_tokens):
         parameters = {

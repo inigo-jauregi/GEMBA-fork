@@ -7,3 +7,4 @@ ipdb
 absl-py
 diskcache
 tqdm
+boto3
