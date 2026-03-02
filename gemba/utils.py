@@ -7,7 +7,8 @@ from gemba.gemba_esa import TEMPLATE_GEMBA_ESA_ERROR_SPANS, TEMPLATE_GEMBA_ESA_R
 from gemba.prompt import prompts, validate_number
 
 
-def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model, list_mqm_errors=False):
+def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model, list_mqm_errors=False,
+                     inference_type="on_demand"):
     df = pd.DataFrame({'source_seg': source, 'target_seg': hypothesis})
     df['source_lang'] = source_lang
     df['target_lang'] = target_lang
@@ -18,7 +19,8 @@ def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model
     if method == "GEMBA-MQM":
         df["prompt"] = df.apply(lambda x: apply_template(TEMPLATE_GEMBA_MQM, x), axis=1)
         parse_answer = lambda x: parse_mqm_answer(x, list_mqm_errors=list_mqm_errors, full_desc=True)
-        answers = gptapi.bulk_request(df, model, parse_answer, cache=cache, max_tokens=500)
+        answers = gptapi.bulk_request(df, model, parse_answer, cache=cache, max_tokens=4096,
+                                      inference_type=inference_type)
     elif method in ["GEMBA-DA", "GEMBA-DA_ref", "GEMBA-SQM", "GEMBA-SQM_ref", "GEMBA-stars", "GEMBA-stars_ref", "GEMBA-classes", "GEMBA-classes_ref"]:
         df["prompt"] = df.apply(lambda x: apply_template(prompts[method]['prompt'], x), axis=1)
         parse_answer = prompts[method]["validate_answer"]

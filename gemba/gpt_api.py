@@ -10,6 +10,8 @@ import tqdm
 import boto3
 import json
 
+from gemba.bedrock_utils import build_bedrock_inference_data_object, gather_response_bedrock_inference
+
 
 # class for calling OpenAI API and handling cache
 class GptApi:
@@ -26,6 +28,17 @@ class GptApi:
             else:
                 self.client = boto3.client(service_name='bedrock-runtime', region_name=region_name)
             self.api_type = "bedrock"
+            # S3 temporary data config
+            self.input_data_config = {
+                "s3InputDataConfig": {
+                    "s3Uri": f"s3://ctrlpost-bedrock-inference-bucket/input_data/input_gemba_tmp.jsonl",
+                }
+            }
+            self.output_data_config = {
+                "s3OutputDataConfig": {
+                    "s3Uri": f"s3://ctrlpost-bedrock-inference-bucket/output_data/",
+                }
+            }
         elif "OPENAI_AZURE_ENDPOINT" in os.environ:
             assert "OPENAI_AZURE_KEY" in os.environ, "OPENAI_AZURE_KEY not found in environment"
 
@@ -95,6 +108,84 @@ class GptApi:
             return self.request(prompt, model, parse_response, temperature=temperature + 1, answer_id=answer_id, cache=cache)
 
         return parsed_answers
+
+    def request_batch(self, df, model, parse_response, max_tokens=None):
+
+        # Prepare the data for batch inference in AWS Bedrock
+        id2prompt = {}
+        with (open(f'tmp/input_gemba_tmp.jsonl', 'w') as f):
+            for idx, src in df.iterrows():
+                # Write each prediction to the file
+                data_object = build_bedrock_inference_data_object(idx, src['prompt'], model, max_tokens=max_tokens)
+                f.write(json.dumps(data_object) + '\n')
+                id2prompt[idx] = src['prompt']
+
+        # Upload the input data to S3
+        s3 = boto3.client('s3')
+        s3.upload_file(
+            f'tmp/input_gemba_tmp.jsonl', "ctrlpost-bedrock-inference-bucket",
+            f'input_data/input_gemba_tmp.jsonl.jsonl')
+
+        # Invoke batch job with the input data
+        print(f"S3 region: {self.bedrock_client.meta.region_name}")
+        response = self.bedrock_client.create_model_invocation_job(
+            jobName=f"gemba-job-{int(time.time())}",
+            roleArn="arn:aws:iam::209378968454:role/ctrlpost-bedrock-inference-role",
+            modelId=model,
+            inputDataConfig=self.input_data_config,
+            outputDataConfig=self.output_data_config
+        )
+
+        # Wait for the job to complete
+        job_arn = response.get('jobArn')
+        # job_arn = "arn:aws:bedrock:ap-southeast-2:209378968454:model-invocation-job/1gxm5lod7lje"
+        while True:
+            response = self.bedrock_client.get_model_invocation_job(jobIdentifier=job_arn)
+            status = response['status']
+            if status == 'Completed':
+                print("Job succeeded")
+                break
+            if status in ['Failed', 'Cancelled']:
+                raise RuntimeError(f"Job failed with status {status}")
+            time.sleep(60)  # Wait for a minute before checking again
+
+        # Once the job has succeeded, download the output data
+        suffix_job = job_arn.split('model-invocation-job/')[-1]
+        s3.download_file("ctrlpost-bedrock-inference-bucket", f"output_data/{suffix_job}/input_gemba_tmp.jsonl.out",
+                         f'tmp/output_gemba_tmp.jsonl')
+
+        parsed_answers = []
+        # Read the output data
+        with open(f'tmp/output_gemba_tmp.jsonl', 'r') as f:
+            for line in f:
+                full_response = json.loads(line)
+                answer_id = int(response['recordId']) - 1
+                try:
+                    full_answer, stop_reason = gather_response_bedrock_inference(full_response, model)
+                except Exception as e:
+                    # print(f"Error parsing response: {e}")
+                    full_answer = ""
+                    stop_reason = "unknown"
+                answer = parse_response(full_answer)
+                if self.verbose:
+                    print(f"Answer (t=0): " + colored(answer, "yellow") + " (" + colored(full_answer,
+                                                                                                     "blue") + ")",
+                          file=sys.stderr)
+                if answer is None:
+                    continue
+                parsed_answers.append(
+                    {
+                        "temperature": 0,
+                        "answer_id": answer_id,
+                        "answer": answer,
+                        "prompt": id2prompt[answer_id],
+                        "finish_reason": stop_reason,
+                        "model": model,
+                    }
+                )
+
+        return parsed_answers
+
 
     def request_api(self, prompt, model, temperature=0, max_tokens=None):
         if temperature > 10:
@@ -284,10 +375,16 @@ class GptApi:
 
         return self.client.chat.completions.create(**parameters)
     
-    def bulk_request(self, df, model, parse_mqm_answer, cache, max_tokens=None):
-        answers = []
-        for i, row in tqdm.tqdm(df.iterrows(), total=len(df), file=sys.stderr):
-            prompt = row["prompt"]
-            parsed_answers = self.request(prompt, model, parse_mqm_answer, cache=cache, max_tokens=max_tokens)
-            answers += parsed_answers
+    def bulk_request(self, df, model, parse_mqm_answer, cache, max_tokens=None, inference_type='on_demand'):
+
+        if inference_type == 'on_demand':
+            answers = []
+            for i, row in tqdm.tqdm(df.iterrows(), total=len(df), file=sys.stderr):
+                prompt = row["prompt"]
+                parsed_answers = self.request(prompt, model, parse_mqm_answer, cache=cache, max_tokens=max_tokens)
+                answers += parsed_answers
+        elif inference_type == 'batch':
+            answers = self.request_batch(df, model, parse_mqm_answer, max_tokens=max_tokens)
+        else:
+            raise Exception(f"Inference type {inference_type} not supported.")
         return answers
