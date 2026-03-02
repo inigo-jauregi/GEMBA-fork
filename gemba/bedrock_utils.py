@@ -29,12 +29,16 @@ def build_bedrock_inference_data_object(idx, pred, model_name, system_prompt=Non
         data_object = {
             "recordID": idx,
             "modelInput": {
-                "max_tokens": max_tokens,
-                "temperature": temperature,
+                # "max_tokens": max_tokens,
+                # "temperature": temperature,
                 "messages": [
                     {
                         "role": "user",
-                        "content": pred
+                        "content": [
+                            {
+                                "text": pred,
+                            }
+                        ]
                     }
                 ]
             }
