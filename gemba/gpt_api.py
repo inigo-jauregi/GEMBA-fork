@@ -277,7 +277,7 @@ class GptApi:
 
         inference_config = {
             "temperature": temperature / 10.0,
-            "topP": 1.0,
+            # "topP": 1.0,
         }
         if max_tokens:
             inference_config["maxTokens"] = max_tokens

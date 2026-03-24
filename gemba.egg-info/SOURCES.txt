@@ -3,6 +3,7 @@ README.md
 pyproject.toml
 gemba/__init__.py
 gemba/__main__.py
+gemba/bedrock_utils.py
 gemba/cli.py
 gemba/gemba_da.py
 gemba/gemba_esa.py

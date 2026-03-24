@@ -476,6 +476,14 @@ or
 export OPENAI_API_KEY=
 ```
 
+or for Amazon Bedrock:
+
+```
+export AWS_ACCESS_KEY_ID=
+export AWS_SECRET_ACCESS_KEY=
+export AWS_REGION_NAME=us-east-1
+```
+
 ## Scoring with GEMBA
 
 It assumes two files with the same number of lines. It prints the score for each line pair:
@@ -484,6 +492,8 @@ It assumes two files with the same number of lines. It prints the score for each
 gemba --source=source.txt --hypothesis=hypothesis.txt --source_lang=English --target_lang=Czech --method="GEMBA-MQM" --model="gpt-4"
 # or
 python -m gemba --source=source.txt --hypothesis=hypothesis.txt --source_lang=English --target_lang=Czech --method="GEMBA-MQM" --model="gpt-4"
+# or for Amazon Bedrock
+gemba --source=source.txt --hypothesis=hypothesis.txt --source_lang=English --target_lang=Czech --method="GEMBA-MQM" --model="anthropic.claude-3-sonnet-20240229-v1:0"
 ```
 
 The main recommended methods: `GEMBA-MQM` and `GEMBA-DA` with the model `gpt-4`.
