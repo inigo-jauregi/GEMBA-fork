@@ -8,10 +8,12 @@ from gemba.prompt import prompts, validate_number
 
 
 def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model, list_mqm_errors=False,
-                     inference_type="on_demand"):
+                     inference_type="on_demand", references=None):
     df = pd.DataFrame({'source_seg': source, 'target_seg': hypothesis})
     df['source_lang'] = source_lang
     df['target_lang'] = target_lang
+    if references is not None:
+        df['reference_seg'] = references
 
     cache = dc.Cache(f'cache/{model}_{method}', expire=None, size_limit=int(10e10), cull_limit=0, eviction_policy='none')
     gptapi = GptApi()

@@ -14,6 +14,7 @@ flags.DEFINE_string('source_lang', None, 'Source language name.')
 flags.DEFINE_string('target_lang', None, 'Target language name.')
 flags.DEFINE_boolean('list_mqm_errors', False, 'List MQM errors.')
 flags.DEFINE_string('inference_type', "on_demand", 'on_demand or batch.')
+flags.DEFINE_string('references', None, 'Filepath to the reference file.')
 
 def main(argv):
     assert FLAGS.source is not None, "Source file must be provided."
@@ -39,7 +40,7 @@ def main(argv):
     assert len(source) == len(hypothesis), "Source and hypothesis files must have the same number of lines."
 
     answers = get_gemba_scores(source, hypothesis, FLAGS.source_lang, FLAGS.target_lang, FLAGS.method, FLAGS.model, FLAGS.list_mqm_errors,
-                               FLAGS.inference_type)
+                               FLAGS.inference_type, FLAGS.references)
 
     for answer in answers:
         print(answer)
