@@ -3,6 +3,19 @@ def build_bedrock_inference_data_object(idx, pred, model_name, system_prompt=Non
                                         temperature=0.0):
 
     if "anthropic" in model_name:
+
+        new_pred = []
+        system_prompt_content = None
+        for dict_elem in pred:
+            content_str = dict_elem['content']
+            new_dict = {}
+            if dict_elem['role'] != 'system':
+                new_dict['role'] = dict_elem['role']
+                new_dict['content'] = [{"type": "text", "text": content_str}]
+                new_pred.append(new_dict)
+            else:
+                system_prompt_content = dict_elem['content']
+
         data_object = {
             "recordID": idx,
             "modelInput": {
@@ -10,41 +23,46 @@ def build_bedrock_inference_data_object(idx, pred, model_name, system_prompt=Non
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 # "top_p": self.top_p,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{
-                            "type": "text",
-                            "text": pred
-                        }
-                        ]
-                    }
-                ]
+                "messages": new_pred
             }
         }
         if system_prompt:
-            data_object['modelInput']['system'] = system_prompt.value
+            data_object['modelInput']['system'] = system_prompt_content
 
     elif "amazon.nova" in model_name:
+
+        new_pred = []
+        system_prompt_content = None
+        for dict_elem in pred:
+            content_str = dict_elem['content']
+            new_dict = {}
+            if dict_elem['role'] != 'system':
+                new_dict['role'] = dict_elem['role']
+                new_dict['content'] = [{"text": content_str}]
+                new_pred.append(new_dict)
+            else:
+                system_prompt_content = dict_elem['content']
+
         data_object = {
             "recordID": idx,
             "modelInput": {
                 # "max_tokens": max_tokens,
                 # "temperature": temperature,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "text": pred,
-                            }
-                        ]
-                    }
-                ]
+                # "messages": [
+                #     {
+                #         "role": "user",
+                #         "content": [
+                #             {
+                #                 "text": pred,
+                #             }
+                #         ]
+                #     }
+                # ]
+                "messages": new_pred
             }
         }
-        if system_prompt:
-            data_object['modelInput']['system'] = [{"text": system_prompt.value}]
+        if system_prompt_content:
+            data_object['modelInput']['system'] = [{"text": system_prompt_content}]
 
     elif "qwen" in model_name:
         data_object = {
@@ -75,11 +93,11 @@ def build_bedrock_inference_data_object(idx, pred, model_name, system_prompt=Non
 def gather_response_bedrock_inference(response, model_name):
 
     if "anthropic" in model_name:
-        parsed_response = response['modelOutput']['content']
+        parsed_response = response['modelOutput']['content'][0]['text']
         stop_reason = response['modelOutput']['stop_reason']
     elif "amazon.nova" in model_name:
-        parsed_response = response['modelOutput']['output']['message']['content']
-        stop_reason = response['modelOutput']['output']['stop_reason']
+        parsed_response = response['modelOutput']['output']['message']['content'][0]['text']
+        stop_reason = response['modelOutput']['stopReason']
     elif "qwen" in model_name:
         # print(response)
         parsed_response = response['modelOutput']['choices'][0]['message']['content']

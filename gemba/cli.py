@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 
 from absl import app, flags
 
@@ -42,8 +43,13 @@ def main(argv):
     answers = get_gemba_scores(source, hypothesis, FLAGS.source_lang, FLAGS.target_lang, FLAGS.method, FLAGS.model, FLAGS.list_mqm_errors,
                                FLAGS.inference_type, FLAGS.references)
 
-    for answer in answers:
-        print(answer)
+    if FLAGS.method == 'GEMBA-MQM':
+        for answer in answers:
+            print(json.dumps(answer))
+
+    else:
+        for answer in answers:
+            print(answer)
 
 
 def run():

@@ -15,18 +15,19 @@ from gemba.bedrock_utils import build_bedrock_inference_data_object, gather_resp
 
 # class for calling OpenAI API and handling cache
 class GptApi:
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, inference_type='on_demand'):
         self.verbose = verbose
 
         if "AWS_ACCESS_KEY_ID" in os.environ or "AWS_PROFILE" in os.environ:
             # Bedrock API access
             region_name = os.environ.get("AWS_REGION_NAME", "us-east-1")
             profile_name = os.environ.get("AWS_PROFILE")
+            bedrock_service = 'bedrock-runtime' if inference_type=='on_demand' else 'bedrock'
             if profile_name:
                 session = boto3.Session(profile_name=profile_name)
-                self.client = session.client(service_name='bedrock-runtime', region_name=region_name)
+                self.client = session.client(service_name=bedrock_service, region_name=region_name)
             else:
-                self.client = boto3.client(service_name='bedrock-runtime', region_name=region_name)
+                self.client = boto3.client(service_name=bedrock_service, region_name=region_name)
             self.api_type = "bedrock"
             # S3 temporary data config
             self.input_data_config = {
@@ -118,35 +119,37 @@ class GptApi:
                 # Write each prediction to the file
                 data_object = build_bedrock_inference_data_object(idx, src['prompt'], model, max_tokens=max_tokens)
                 f.write(json.dumps(data_object) + '\n')
-                id2prompt[idx] = src['prompt']
+                id2prompt[idx] = {'src': src['source_seg'], 'pred': src['target_seg'], 'prompt': src['prompt']}
 
         # Upload the input data to S3
         s3 = boto3.client('s3')
         s3.upload_file(
             f'tmp/input_gemba_tmp.jsonl', "ctrlpost-bedrock-inference-bucket",
-            f'input_data/input_gemba_tmp.jsonl.jsonl')
+            f'input_data/input_gemba_tmp.jsonl')
 
         # Invoke batch job with the input data
-        print(f"S3 region: {self.bedrock_client.meta.region_name}")
-        response = self.bedrock_client.create_model_invocation_job(
+        # print(f"S3 region: {self.client.meta.region_name}")
+        response = self.client.create_model_invocation_job(
             jobName=f"gemba-job-{int(time.time())}",
             roleArn="arn:aws:iam::209378968454:role/ctrlpost-bedrock-inference-role",
             modelId=model,
             inputDataConfig=self.input_data_config,
             outputDataConfig=self.output_data_config
         )
+        # print('Submitted job!')
 
         # Wait for the job to complete
         job_arn = response.get('jobArn')
         # job_arn = "arn:aws:bedrock:ap-southeast-2:209378968454:model-invocation-job/1gxm5lod7lje"
         while True:
-            response = self.bedrock_client.get_model_invocation_job(jobIdentifier=job_arn)
+            response = self.client.get_model_invocation_job(jobIdentifier=job_arn)
             status = response['status']
             if status == 'Completed':
-                print("Job succeeded")
+                # print("Job succeeded")
                 break
             if status in ['Failed', 'Cancelled']:
                 raise RuntimeError(f"Job failed with status {status}")
+            # print('Processing...')
             time.sleep(60)  # Wait for a minute before checking again
 
         # Once the job has succeeded, download the output data
@@ -159,7 +162,7 @@ class GptApi:
         with open(f'tmp/output_gemba_tmp.jsonl', 'r') as f:
             for line in f:
                 full_response = json.loads(line)
-                answer_id = int(response['recordId']) - 1
+                answer_id = int(full_response['recordId']) - 1
                 try:
                     full_answer, stop_reason = gather_response_bedrock_inference(full_response, model)
                 except Exception as e:
@@ -178,9 +181,11 @@ class GptApi:
                         "temperature": 0,
                         "answer_id": answer_id,
                         "answer": answer,
-                        "prompt": id2prompt[answer_id],
+                        "prompt": id2prompt[answer_id]['prompt'],
                         "finish_reason": stop_reason,
                         "model": model,
+                        "src": id2prompt[answer_id]['src'],
+                        "pred": id2prompt[answer_id]['pred']
                     }
                 )
 

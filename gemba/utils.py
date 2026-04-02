@@ -16,13 +16,14 @@ def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model
         df['reference_seg'] = references
 
     cache = dc.Cache(f'cache/{model}_{method}', expire=None, size_limit=int(10e10), cull_limit=0, eviction_policy='none')
-    gptapi = GptApi()
+    gptapi = GptApi(inference_type=inference_type)
 
     if method == "GEMBA-MQM":
         df["prompt"] = df.apply(lambda x: apply_template(TEMPLATE_GEMBA_MQM, x), axis=1)
         parse_answer = lambda x: parse_mqm_answer(x, list_mqm_errors=list_mqm_errors, full_desc=True)
         answers = gptapi.bulk_request(df, model, parse_answer, cache=cache, max_tokens=4096,
                                       inference_type=inference_type)
+        return answers
     elif method in ["GEMBA-DA", "GEMBA-DA_ref", "GEMBA-SQM", "GEMBA-SQM_ref", "GEMBA-stars", "GEMBA-stars_ref", "GEMBA-classes", "GEMBA-classes_ref"]:
         df["prompt"] = df.apply(lambda x: apply_template(prompts[method]['prompt'], x), axis=1)
         parse_answer = prompts[method]["validate_answer"]
