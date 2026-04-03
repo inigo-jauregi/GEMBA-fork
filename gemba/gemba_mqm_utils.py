@@ -6,16 +6,22 @@ from collections import defaultdict
 def apply_template(template, data):
     if isinstance(template, str):
         if 'reference_seg' not in data:
-            template = remove_human_ref_from_template(template, data['target_lang'])
+            template = remove_human_ref_from_template(template)
+            # print("***************************************")
+            # print(template.format(**data))
+            # print("***************************************")
         return template.format(**data)
     elif isinstance(template, list):
         prompt = []
         for conversation_turn in template:
             p = conversation_turn.copy()
             if 'reference_seg' not in data:
-                p['content'] = remove_human_ref_from_template(p['content'], data['target_lang'])
+                p['content'] = remove_human_ref_from_template(p['content'])
             p['content'] = p['content'].format(**data)
             prompt.append(p)
+        # print("***************************************")
+        # print(prompt)
+        # print("***************************************")
         return prompt
     else:
         raise ValueError(f"Unknown template type {type(template)}")
@@ -151,10 +157,9 @@ def parse_mqm_answer(x, list_mqm_errors=False, full_desc=True):
         return -final_score
 
 
-def remove_human_ref_from_template(template, target_lang):
+def remove_human_ref_from_template(template):
 
-    string_to_remove = f"""{target_lang} human reference:"
-                        ```{{reference_seg}}```"""
+    string_to_remove = f"""{{target_lang}} human reference:\n```{{reference_seg}}```"""
 
     return template.replace(string_to_remove, "")
 
@@ -173,12 +178,13 @@ def mqm_fewshot(few_shots):
 {target_lang} translation:
 ```{target_seg}```
 
-Based on the source segment and machine translation surrounded with triple backticks, identify error types in the translation and classify them. The categories of errors are: accuracy (addition, mistranslation, omission, untranslated text), fluency (character encoding, grammar, inconsistency, punctuation, register, spelling), style (awkward), terminology (inappropriate for context, inconsistent use), non-translation, other, or no-error.\nEach error is classified as one of three categories: critical, major, and minor. Critical errors inhibit comprehension of the text. Major errors disrupt the flow, but what the text is trying to say is still understandable. Minor errors are technically errors, but do not disrupt the flow or hinder comprehension."""
+Based on the source segment, the human-reference segment and machine translation surrounded with triple backticks, identify error types in the machine translation and classify them. The categories of errors are: accuracy (addition, mistranslation, omission, untranslated text), fluency (character encoding, grammar, inconsistency, punctuation, register, spelling), style (awkward), terminology (inappropriate for context, inconsistent use), non-translation, other, or no-error.\nEach error is classified as one of three categories: critical, major, and minor. Critical errors inhibit comprehension of the text. Major errors disrupt the flow, but what the text is trying to say is still understandable. Minor errors are technically errors, but do not disrupt the flow or hinder comprehension."""
    
     for shot in few_shots:
 
-        shot_template = template.format(**shot)
-        shot_template = remove_human_ref_from_template(shot_template, shot['target_lang'])
+        shot_template = remove_human_ref_from_template(template)
+        shot_template = shot_template.format(**shot)
+
         prompts.append({
             "role": "user",
             "content": shot_template

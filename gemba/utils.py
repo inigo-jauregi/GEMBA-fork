@@ -13,6 +13,7 @@ def get_gemba_scores(source, hypothesis, source_lang, target_lang, method, model
     df['source_lang'] = source_lang
     df['target_lang'] = target_lang
     if references is not None:
+        # print(references)
         df['reference_seg'] = references
 
     cache = dc.Cache(f'cache/{model}_{method}', expire=None, size_limit=int(10e10), cull_limit=0, eviction_policy='none')

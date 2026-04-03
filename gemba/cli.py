@@ -27,6 +27,9 @@ def main(argv):
     if not os.path.isfile(FLAGS.hypothesis):
         print(f"Hypothesis file {FLAGS.hypothesis} does not exist.")
         sys.exit(1)
+    if not os.path.isfile(FLAGS.references):
+        print(f"Hypothesis file {FLAGS.references} does not exist.")
+        sys.exit(1)
 
     assert FLAGS.source_lang is not None, "Source language name must be provided."
     assert FLAGS.target_lang is not None, "Target language name must be provided."
@@ -37,11 +40,17 @@ def main(argv):
     with open(FLAGS.hypothesis, 'r') as f:
         hypothesis = f.readlines()
     hypothesis = [x.strip() for x in hypothesis]
+    if FLAGS.references is not None:
+        with open(FLAGS.references, 'r') as f:
+            references = f.readlines()
+        references = [x.strip() for x in references]
+    else:
+        references = None
 
     assert len(source) == len(hypothesis), "Source and hypothesis files must have the same number of lines."
 
     answers = get_gemba_scores(source, hypothesis, FLAGS.source_lang, FLAGS.target_lang, FLAGS.method, FLAGS.model, FLAGS.list_mqm_errors,
-                               FLAGS.inference_type, FLAGS.references)
+                               FLAGS.inference_type, references)
 
     if FLAGS.method == 'GEMBA-MQM':
         for answer in answers:
