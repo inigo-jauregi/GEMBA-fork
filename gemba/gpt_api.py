@@ -15,8 +15,9 @@ from gemba.bedrock_utils import build_bedrock_inference_data_object, gather_resp
 
 # class for calling OpenAI API and handling cache
 class GptApi:
-    def __init__(self, verbose=False, inference_type='on_demand'):
+    def __init__(self, verbose=False, inference_type='on_demand', type='eval'):
         self.verbose = verbose
+        self.type_gemba=type
 
         if "AWS_ACCESS_KEY_ID" in os.environ or "AWS_PROFILE" in os.environ:
             # Bedrock API access
@@ -32,7 +33,7 @@ class GptApi:
             # S3 temporary data config
             self.input_data_config = {
                 "s3InputDataConfig": {
-                    "s3Uri": f"s3://ctrlpost-bedrock-inference-bucket/input_data/input_gemba_tmp.jsonl",
+                    "s3Uri": f"s3://ctrlpost-bedrock-inference-bucket/input_data/input_gemba_{self.type_gemba}_tmp.jsonl",
                 }
             }
             self.output_data_config = {
@@ -114,7 +115,7 @@ class GptApi:
 
         # Prepare the data for batch inference in AWS Bedrock
         id2prompt = {}
-        with (open(f'tmp/input_gemba_tmp.jsonl', 'w') as f):
+        with (open(f'tmp/input_gemba_{self.type_gemba}_tmp.jsonl', 'w') as f):
             for idx, src in df.iterrows():
                 # Write each prediction to the file
                 data_object = build_bedrock_inference_data_object(idx, src['prompt'], model, max_tokens=max_tokens)
@@ -124,8 +125,8 @@ class GptApi:
         # Upload the input data to S3
         s3 = boto3.client('s3')
         s3.upload_file(
-            f'tmp/input_gemba_tmp.jsonl', "ctrlpost-bedrock-inference-bucket",
-            f'input_data/input_gemba_tmp.jsonl')
+            f'tmp/input_gemba_{self.type_gemba}_tmp.jsonl', "ctrlpost-bedrock-inference-bucket",
+            f'input_data/input_gemba_{self.type_gemba}_tmp.jsonl')
 
         # Invoke batch job with the input data
         # print(f"S3 region: {self.client.meta.region_name}")
@@ -154,12 +155,12 @@ class GptApi:
 
         # Once the job has succeeded, download the output data
         suffix_job = job_arn.split('model-invocation-job/')[-1]
-        s3.download_file("ctrlpost-bedrock-inference-bucket", f"output_data/{suffix_job}/input_gemba_tmp.jsonl.out",
-                         f'tmp/output_gemba_tmp.jsonl')
+        s3.download_file("ctrlpost-bedrock-inference-bucket", f"output_data/{suffix_job}/input_gemba_{self.type_gemba}_tmp.jsonl.out",
+                         f'tmp/output_gemba_{self.type_gemba}_tmp.jsonl')
 
         parsed_answers = []
         # Read the output data
-        with open(f'tmp/output_gemba_tmp.jsonl', 'r') as f:
+        with open(f'tmp/output_gemba_{self.type_gemba}_tmp.jsonl', 'r') as f:
             for line in f:
                 full_response = json.loads(line)
                 answer_id = int(full_response['recordId']) - 1
